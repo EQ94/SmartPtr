@@ -1,0 +1,330 @@
+/*
+智能指针
+
+智能指针是利用了一种叫做RAII(资源获取初始化)的技术对普通的指针进行封装，这使得智能指针实质上是一个对象，行为表现的却像一个指针。
+
+智能指针的作用是防止忘记调用delete释放内存和程序异常的进入catch块，从而忘记释放内存。另外指针的释放时机也是非常考究的，多次释放同一个指针会造成程序的崩溃，这些都可以通过智能指针来解决。
+
+智能指针还有一个作用是把值语义转换成引用语义。
+
+智能指针在C++11版本之后提供，包含在头文件<memory>中，shared_ptr，unique_ptr，weak_ptr
+
+【shared_ptr】
+shared_ptr多个指针指向相同的对象。
+shared_ptr使用引用计数，每一个shared_ptr的拷贝都指向相同的内存。每使用它一次，内部的引用计数就加1，每析构一次，内部的引用计数减1，减为0时，自动删除所指向的堆内存。shared_ptr内存的引用计数是线程安全的，但是对象的读取需要加锁。
+1）初始化。智能指针是模板类，可以指定类型，传入指针通过构造函数初始化。也可以使用make_shared函数初始化。不能将指针直接赋值给一个智能指针，一个是类，一个是指针。
+2）拷贝和赋值。拷贝使得对象的引用计数增加1，赋值使得原对象引用减1，当计数为0时，自动释放内存。后来指向的对象引用计数加1，指向后来的对象。
+3）get函数获取原始指针
+4）注意不要用一个原始指针初始化多个shared_ptr，否则会造成二次释放同一块内存
+5）注意避免循环引用，shared_ptr的一个最大的陷阱是循环引用，循环，循环引用会导致堆内存无法正确释放，导致内存泄露。循环引用外weak_ptr中介绍。
+
+*/
+// https://www.jianshu.com/p/d365bfbb83a3
+
+
+// https://zhuanlan.zhihu.com/p/63488452
+tmplate<class T>
+class SharedPointer{
+public:
+		// 默认构造函数，内部指针， 未指向任何资源，引用计数为0，因为未与任何资源绑定
+		SharedPointer():m_refCount(nullptr),m_pointer(nullptr){}
+		
+		// 构造函数，初始化时
+		SharedPointer(T* adoptTarget):m_refCount(nullptr),m_pointer(adoptTarget)
+		{
+			addReference();
+		}
+		// 构造函数，使用其他对象创建对象
+		SharedPointer(const SharedPointer<T>& copy)
+			:m_refCount(copy.m_refCount),m_pointer(copy.m_pointer)
+		{
+			addReference();
+		}
+		// 析构函数，引用计数递减，当为0时，释放资源
+		virtual ~SharedPointer()
+		{
+			removeReference();
+		}
+		// 赋值操作
+		// 当左值被赋值时，表明它不再指向所指的资源，所以引用减一
+		// 之后，它指向了新的资源，所以对应这个资源的引用计数加一
+		SharedPointer<T>& operator=(const SharedPointer<T>& that)
+		{
+			if(this != &that)
+			{	
+				removeReference();
+				this->m_pointer = that.m_pointer;
+				this->m_refCount = that.m_pointer;
+				addReference();
+			}
+			return *this;
+		}
+		
+		// 判断是否指向同一个资源
+		bool operator==(const SharedPointer<T>& other)
+		{
+			return m_pointer == other.m_pointer;
+		}
+		bool operator!=(const SharedPointer<T>& other)
+		{	
+			return !operator==(other);
+		}
+		
+		// 指针解引用
+		T& operator*() const
+		{
+			return *m_pointer;
+		}
+		
+		// 调用所知对象的公共成员
+		T* operator->() const
+		{
+			return m_pointer;
+		}
+		
+		// 获取引用计数个数
+		int GetReferenceCount() const
+		{
+			if(m_refCount)
+			{
+				return *m_refCount;
+			}
+			else
+			{
+				return -1;
+			}
+		}
+		
+protected:
+		// 当为nullptr时，创建引用计数资源，并初始化为1
+		// 否则，引用计数加1
+		void addReference()
+		{
+			if(m_refCount)
+			{
+				(*m_refCount)++;
+			}
+			else
+			{
+				m_refCount = new int(0);
+				*m_refCount = 1;
+			}
+		}
+		
+		// 引用计数减一，当变为0时，释放所有资源
+		void removeReference()
+		{
+			if(m_refCount)
+			{
+				(*m_pointer)--;
+				if(*m_refCount == 0)
+				{
+					delete m_refCount;
+					delete m_pointer;
+					m_refCount = 0;
+					m_pointer = 0;
+				}
+			}
+		}
+		
+private:
+		int *m_refCount;
+		T * m_pointer;
+}
+
+/*
+	shared_ptr需要加锁的原因分析：	https://blog.csdn.net/Solstice/article/details/8547547
+	shared_ptr的引用计数本身是安全且无锁的，但对象的读写则不是，因为shared_ptr有两个数据成员，读写操作不能原子化。
+	一个shared_ptr对象实体可以被多个线程同时读取；
+	两个shared_ptr对象实体可以被两个线程同时写入，“析构”算写操作；
+	如果要从多个线程读写同一个shard_ptr对象，那么需要加锁。
+*/
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//													unique_ptr												       ///
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+/*
+unique_ptr的使用
+
+unique_ptr“唯一”拥有其所指对象，同一时刻只能有一个unique_ptr指向给定对象（通过禁止拷贝语义，只有移动语义来实现）。相比于原始指针unique_ptr用于其RAII的特性，使得在出现异常的情况下，动态资源能得到释放。unique_ptr指针本身的生命周期：从unique_ptr指针创建时开始，直到离开作用域。离开作用域时，若指向对象，则将其所指对象销毁（默认使用delete操作符，用户可以指定其他操作）。unique_ptr指针与其所指对象的关系：在智能指针生命周期内，可以改变智能指针所指对象，如创建智能指针时通过构造函数指定，通过reset方法重新指定，通过release方法释放所有权，通过移动语义转移所有权。
+
+unique_ptr 持有对对象的度有权，即两个unique_ptr不能指向一个对象，不能进行赋值操作，只能进行移动操作
+
+unique_ptr 之所以叫这个名字，是因为它智能指向一个对象，即当它指向其他对象时，之前所指向的对象会比摧毁，其次，当unique_ptr超出作用域时，指向的对象也会被自动摧毁，实现了自动释放的功能。
+
+*/
+
+// unique_ptr<T>，管理通过new获得原生指针
+// unique_ptr<T[]> ， 管理通过new[]获得的指针数组
+
+// 下面为 unique_ptr 源码分析
+template<class _Tp,class _Dp = default_delete<_Tp> >
+class unique_ptr{
+public:
+		typedef _Tp element_type;  // typedef 类似于宏，比宏更方便
+		typedef _Dp deleter_type;
+		typedef typename _pointer_type<_Tp, deleter_type>::type pointer;
+		
+private:
+		__compressed_pair<pointer,deleter_type> __ptr_;
+		
+		// ...
+};
+/*
+	unique_ptr的声明包含两个模板参数，第一个参数 _Tp 显然是原生指针的类型。第二个模板参数 _Dp是一个deleter,默认值为default_delete<_Tp>。default_delete是一个针对delete operator的函数对象。
+*/
+
+template<class T>
+struct default_delete{
+	void operator()(T* ptr)const noexcept{  // noexcept 运算符进行编译时检查，若表达式声明为不抛出任何异常则返回true。
+		delete ptr;                         // noexcept 可以用于函数模板中，以声明函数将对某些类型抛出异常，但不对其他类型抛出异常
+	}
+};
+
+
+typedef typename _pointer_type<_Tp, deleter_type>::type pointer;
+/*
+_pointer_type是一个type trait，用来萃取出正确的指针类型。为了方便理解，可以理解与下面这一句代码是等价的：
+
+	typedef _Tp* pointer;
+*/
+
+/*
+unique_ptr内部使用__compressed_pair保存数据，__compressed_pair是一个空基类优化的pair,阅读源码时，完全可以将它当做一个std::pair来看待 
+*/
+
+/*
+constexpr :
+	constexpr 	修饰的函数，如果在其传入的参数可以在编译时期计算出来，那么这个函数就会产生编译时期的值，但是，传入的参数如果不能在编译时期计算出来，那么constexpr修饰的函数就和普通函数一样了。
+	
+	constexpr说明符声明可以在编译时求得函数或变量的值。然后这些变量和函数即可用于仅允许编译时常量表达式之处。
+*/
+template<class _Tp, class _Dp = default_delete<_Tp> >
+class unique_ptr{
+	
+public:
+	// 默认构造函数，调用pointer的默认构造函数
+	inline constexpr unique_ptr() noexcept 
+		:__ptr_(pointer()){
+	}
+	
+	// 将一个nullptr转换为一个unique_ptr
+	inline constexpr unique_ptr(nullptr_t) noexcept
+		:__ptr_(pointer()){
+	}
+	
+	// 拷贝构造函数，注意参数类型为pointer，而不是const point&
+	inline explicit unique_ptr(pointer __p) noexcept
+		:__ptr_(move(__p)){
+	}
+	
+	// 移动构造函数
+	inline unique_ptr(unique_ptr && __u) noexcept
+		:__ptr_(__u.release(),
+		   std::forward<deleter_type>(__u.get_deleter())){
+	}
+	
+	// 移动赋值
+	inline unique_ptr& operator=(unique_ptr && __u) noexcept{
+		reset(__u.release());
+		__ptr_.second() = std::forward<deleter_type>(__u.get_deleter());
+		return *this;
+	}
+	
+	inline ~unique_ptr(){reset();}
+	
+	//...
+	
+	
+	// 放弃对原生指针的所有权，并返回原生指针
+	inline pointer release() noexcept{
+		pointer __t = __ptr_.first();
+		__ptr_.first() = pointer();
+		return _-t;
+	}
+	
+	// 用__p替换原生指针，被替换的指针最终被销毁
+	inline void reset(pointer __p = pointer()) noexcept{
+			pointer __tmp = __ptr_.first();
+			__ptr_.first() = __p'
+			if(__tmp)
+				__ptr_.second()(__tmp);
+	}
+	
+	inline add_lvalue_reference<_Tp>::type operator*() const{
+		return *__ptr_.first();
+	}
+	
+	inline pointer operator->() const noexcept{
+		return __ptr_.first();
+	}
+}
+
+
+/////////////////////////////////////////////////////////////////////// unique_ptr ///////////////////////////////
+/*          https://yizhi.ren/2016/11/14/uniqueptr/
+unique_ptr的出现时为了解决auto_ptr的两个，一个是静默的控制权问题，一个是不支持数组的问题
+
+1 显示的控制权转移：
+
+unique_ptr(unique_ptr && __u)
+unique_ptr& operator=(unique_ptr && __u)
+
+上面的移动构造函数与移动赋值函数，采用“&&”，这样的参数类型不再是“引用”，而是“引用引用”。这个&&不同于引用类型&，也不是逻辑与，而是一种新的类型，也是C++11引入的，叫做右值引用，也就是这个参数类型必须是个右值。【所谓右值，就是用完会消失，没法取得它的地址】
+
+通过右值引用，下面这样的代码就是可以通过的：
+unique_ptr<int> ap1 = unique_ptr<int>(new int(0));
+unique_ptr<int> ap2(unique_ptr<int>(new int(0)));
+
+unique_ptr显示转移的方式，通过move函数，可以把变量转成右值，只是属性上编程右值，并没有进行值的拷贝。控制权转移代码如下：
+unqiue_ptr<int> ap1(new int(0));
+unique_ptr<int> ap2(std::move(ap1));
+// 或者
+unique_ptr<int> ap2 = std::move(ap1);
+*/
+/*
+2 支持数组
+unique_ptr 是通过模板类的数组特化来支持数组类型的指针。也就是他首先实现了一个通用指针的版本，随后又再试下哪一个针对数组类型的版本，特化版本的实现优先级更高，所以如果构造时传入的参数是数组类型，就会走数组的特化版本。
+*/
+template<typename _Tp, typename _Dp = defaule_delete<_Tp> >
+class unique_ptr
+{
+	...
+}
+/// unique_ptr for array objects
+template<typename _Tp, typename _Dp>
+class unique_ptr<_Tp[],_Dp>
+{
+	...
+}
+
+// 以及特化版本的 deletor
+template<typename _Tp>
+struct default_delete
+{
+  ...
+  operator()(_Tp* __ptr) const
+  {
+     delete __ptr;
+  }
+};
+template<typename _Tp>
+struct default_delete<_Tp[]>
+{
+  ...
+  operator()(_Tp* __ptr) const
+  {
+     delete[] __ptr;
+  }
+};
+
+
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+///                                                weak_ptr 												   ///
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+/*
+weak_ptr的使用：
+weak_ptr是为了配合shared_ptr而引入的一种智能指着你，因为它不具有普通指针的行为，没有重载operator* 和 -> ，它的最大作用在于协助shared_ptr工作，想旁观者那样观测资源你的使用情况。weak_ptr可以从一个shared_ptr或者另一个weak_ptr对象构造，获得资源的观测权。但weak_ptr没有共享资源，他的构造不会引起指针引用计数的增加。使用weak_ptr的成员函数use_count()可以观测资源的引用计数，另一个成员函数expired()的功能等价于use_count==0，但更快，表示被观测的资源（也就是shared_ptr的管理的资源）已经不复存在、weak_ptr可以使用一个非常重要的成员函数lock()从被观测的shared_ptr获得一个可用的shared_ptr对象，从而操作资源。但是，但expired()==true的时候，lock()函数将返回一个存储空指针的shared_ptr。
+*/
