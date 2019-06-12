@@ -21,7 +21,6 @@ shared_ptr使用引用计数，每一个shared_ptr的拷贝都指向相同的内
 */
 // https://www.jianshu.com/p/d365bfbb83a3
 
-
 // https://zhuanlan.zhihu.com/p/63488452
 tmplate<class T>
 class SharedPointer{
@@ -141,7 +140,7 @@ private:
 */
 
 ////////////////////////////////////////////////////////////////////////////// 
-//							         unique_ptr				 			   ///
+//				unique_ptr				    //
 ////////////////////////////////////////////////////////////////////////////// 
 
 /*
@@ -177,7 +176,7 @@ private:
 
 template<class T>
 struct default_delete{
-	void operator()(T* ptr)const noexcept{  // noexcept 运算符进行编译时检查，若表达式声明为不抛出任何异常则返回true。
+	void operator()(T* ptr)const noexcept{      // noexcept 运算符进行编译时检查，若表达式声明为不抛出任何异常则返回true。
 		delete ptr;                         // noexcept 可以用于函数模板中，以声明函数将对某些类型抛出异常，但不对其他类型抛出异常
 	}
 };
@@ -338,7 +337,7 @@ p.reset(q)
 
 
 ///////////////////////////////////////////////////////////////////////////////////////
-///                                       weak_ptr 									///
+///                                    weak_ptr   			            ///
 ///////////////////////////////////////////////////////////////////////////////////////
 /*
 weak_ptr的使用：
