@@ -140,9 +140,9 @@ private:
 	如果要从多个线程读写同一个shard_ptr对象，那么需要加锁。
 */
 
-//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-//													unique_ptr												       ///
-//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////// 
+//							         unique_ptr				 			   ///
+////////////////////////////////////////////////////////////////////////////// 
 
 /*
 unique_ptr的使用
@@ -262,7 +262,7 @@ public:
 }
 
 
-/////////////////////////////////////////////////////////////////////// unique_ptr ///////////////////////////////
+////////////////////////////////////////////////// unique_ptr ///////////////////////////////
 /*          https://yizhi.ren/2016/11/14/uniqueptr/
 unique_ptr的出现时为了解决auto_ptr的两个，一个是静默的控制权问题，一个是不支持数组的问题
 
@@ -319,12 +319,141 @@ struct default_delete<_Tp[]>
   }
 };
 
+/*
+unique_ptr的一些操作：
+unique_ptr<T> p  // 空智能指针，可以指向类型是T的对象
+if(p)    		 // 如果p指向一个对象，则是true
+(*p) 			 // 解引用获取指针所指向的对象
+p.get()          // 返回p中保存的指针
+p->number == (*p).number
+swap(p,q)        // 交换p，q指针
+p.swab(q)        // 交换p，q指针
+unique_ptr<T,D> p     // p使用D类型的可调用对象释放它的指针
+p=nullptr        // 释放对象，将p置空
+p.release()      // p放弃对指针的控制，返回指针，p置数空
+p.reset()        // 释放p指向的对象
+p.reset(q)   
+*/
 
 
-//////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-///                                                weak_ptr 												   ///
-//////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+///////////////////////////////////////////////////////////////////////////////////////
+///                                       weak_ptr 									///
+///////////////////////////////////////////////////////////////////////////////////////
 /*
 weak_ptr的使用：
 weak_ptr是为了配合shared_ptr而引入的一种智能指着你，因为它不具有普通指针的行为，没有重载operator* 和 -> ，它的最大作用在于协助shared_ptr工作，想旁观者那样观测资源你的使用情况。weak_ptr可以从一个shared_ptr或者另一个weak_ptr对象构造，获得资源的观测权。但weak_ptr没有共享资源，他的构造不会引起指针引用计数的增加。使用weak_ptr的成员函数use_count()可以观测资源的引用计数，另一个成员函数expired()的功能等价于use_count==0，但更快，表示被观测的资源（也就是shared_ptr的管理的资源）已经不复存在、weak_ptr可以使用一个非常重要的成员函数lock()从被观测的shared_ptr获得一个可用的shared_ptr对象，从而操作资源。但是，但expired()==true的时候，lock()函数将返回一个存储空指针的shared_ptr。
 */
+/*
+weak_ptr的一些操作
+weak_ptr<T> w(sp)       // 定义一个和shared_ptr sp指向相同对象的weak_ptr, w，T必须能转化成sp指向的类型
+w=p                     // pshared_ptr或者weak_ptr，w和p共享对象
+w.reset()               // w置为空
+w.use_count()           // 计算与w共享对象的shared_ptr个数
+w.expired()             // w.use_count()为0，返回true
+w.lock()                // w.expired()为true时，返回空shared_ptr，否则返回w指向对象的shared_ptr
+
+*/
+// https://blog.csdn.net/qq_33762043/article/details/80072391
+// https://www.cnblogs.com/diysoul/p/5930372.html
+  
+class Counter
+{
+public:
+	Counter() :s(0), w(0){};
+	int s;
+	int w;
+};
+template<class T> class WeakPtr;//为了用weak_ptr的lock()，来生成share_ptr用，需要拷贝构造用
+template<class T>
+class WeakPtr
+{
+public://给出默认构造和拷贝构造，其中拷贝构造不能有从原始指针进行构造
+	WeakPtr()
+	{
+		_ptr = 0;
+		cnt = 0;
+		cout << "WeakPtr construct " << endl;
+	}
+	WeakPtr(SharePtr<T>& s) :
+		_ptr(s._ptr), cnt(s.cnt)
+	{
+		cout << "w con s" << endl;
+		cnt->w++;
+	}
+	WeakPtr(WeakPtr<T>& w) :
+		_ptr(w._ptr), cnt(w.cnt)
+	{
+		cnt->w++;
+	}
+	~WeakPtr()
+	{
+		release();
+	}
+	WeakPtr<T>& operator =(WeakPtr<T> & w)
+	{
+		if (this != &w)
+		{
+			release();
+			cnt = w.cnt;
+			cnt->w++;
+			_ptr = w._ptr;
+		}
+		return *this;
+	}
+	WeakPtr<T>& operator =(SharePtr<T> & s)
+	{
+		cout << "w = s" << endl;
+		release();
+		cnt = s.cnt;
+		cnt->w++;
+		_ptr = s._ptr;
+		return *this;
+	}
+	SharePtr<T> lock()
+	{
+		return SharePtr<T>(*this);
+	}
+	bool expired()
+	{
+		if (cnt)
+		{
+			if (cnt->s >0)
+			{
+				cout << "empty " << cnt->s << endl;
+				return false;
+			}
+		}
+		return true;
+	}
+	friend class SharePtr<T>;//方便weak_ptr与share_ptr设置引用计数和赋值。
+private:
+	void release()
+	{
+		cout << "into WeakPtr release" << endl;
+		if (cnt)
+		{
+			cnt->w--;
+			if (cnt->w <1 && cnt->s <1)
+			{
+				cout << "weakptr release" << endl;
+				cnt = NULL;
+			}
+		}
+	}
+	T* _ptr;
+	Counter* cnt;
+};
+ 
+
+
+
+
+
+
+
+
+
+
+
+
